@@ -446,6 +446,59 @@ void TestPredicateFiltration() {
     }
 }
 
+// Проверка поиска документа с недефолтным статусом
+void TestFindDocumentWithNonDefaultStatus() {
+    SearchServer search_server;
+    search_server.SetStopWords("и в на"s);
+
+    search_server.AddDocument(0, "белый кот и модный ошейник"s, DocumentStatus::ACTUAL, { 8, -3 });
+    search_server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
+    search_server.AddDocument(2, "ухоженный пёс выразительные глаза"s, DocumentStatus::ACTUAL, { 5, -12, 2, 1 });
+    search_server.AddDocument(3, "ухоженный скворец евгений"s, DocumentStatus::BANNED, { 9 });
+
+    const string query = "скворец"s;
+    auto res = search_server.FindTopDocuments(query, DocumentStatus::BANNED);
+    auto [words, status] = search_server.MatchDocument(query, 3);
+    for (auto& doc : res)
+        ASSERT_HINT(doc.id == 3 && status == DocumentStatus::BANNED, "Document with status BANNED found incorrently"s);
+}
+
+// Проверка правильности вычисления релевантности
+void TestRelevanceComputing() {
+    SearchServer search_server;
+    search_server.SetStopWords("и в на"s);
+    search_server.AddDocument(0, "белый и модный ошейник"s, DocumentStatus::ACTUAL, { 8, -3 });
+    search_server.AddDocument(1, "ухоженный скворец евгений"s, DocumentStatus::ACTUAL, { 9 });
+
+    double rel = 0.0;
+    for (const Document& document : search_server.FindTopDocuments("пушистый ухоженный кот"s, DocumentStatus::ACTUAL)) {
+        rel = document.relevance;
+    }
+
+    vector<string> query = SplitIntoWords("пушистый ухоженный кот"s);
+    map <string, map<int, double>> wordsToFreq;
+    map <int, double> docToRelevance;
+    vector <string> v_doc0 = SplitIntoWords("белый модный ошейник"s);
+    vector <string> v_doc1 = SplitIntoWords("ухоженный скворец евгений"s);
+    int document_count = 2;
+
+    // Заполняем словарь подобно классу
+    for (auto& i : v_doc0)
+        wordsToFreq[i].insert({ 1, 1.0 / v_doc0.size() });
+    for (auto& i : v_doc1)
+        wordsToFreq[i].insert({ 3, 1.0 / v_doc1.size() });
+
+    for (auto& word : query) {
+        if (wordsToFreq.count(word) == 0)
+            continue;
+        double IDF = log(document_count / wordsToFreq.at(word).size());
+        for (auto& [id, relevance] : wordsToFreq.at(word)) {
+            docToRelevance[id] += relevance * IDF;
+            ASSERT(docToRelevance[id] == rel);
+        }
+    }
+}
+
 // Функция TestSearchServer является точкой входа для запуска тестов
 void TestSearchServer() {
     RUN_TEST(TestExcludeStopWordsFromAddedDocumentContent);
@@ -456,6 +509,8 @@ void TestSearchServer() {
     RUN_TEST(TestCorrectSort);
     RUN_TEST(TestCalculateAverage);
     RUN_TEST(TestPredicateFiltration);
+    RUN_TEST(TestFindDocumentWithNonDefaultStatus);
+    RUN_TEST(TestRelevanceComputing);
 }
 
 int main() {
