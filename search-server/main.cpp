@@ -316,7 +316,8 @@ void TestAddAndFindDocument() {
     server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
     vector<Document> res = server.FindTopDocuments("class find this document");
     doc_cnt = server.GetDocumentCount();
-    ASSERT(res[0].id == doc_id && doc_cnt == 1);    // Проверяем, что документ появился и он нужный нам
+    if (!res.empty())
+        ASSERT(res[0].id == doc_id && doc_cnt == 1);    // Проверяем, что документ появился и он нужный нам
 }
 
 // Проверка удаления стоп-слов из текста документа
@@ -362,9 +363,11 @@ void TestDeleteDocumentsWithMinusWords() {
 
     server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
     auto res = server.FindTopDocuments(query);
-    for (auto& i : res) {
-        ASSERT_HINT(i.id == 1 && res.size() == 1, "Not removed document with one minus-word"s);
-    }
+    auto [words, status] = server.MatchDocument(query, doc_id);
+    vector<string> words_res = { "class", "document" };
+    if (!res.empty()) // Проверяем, что результат не пуст и содержимое корректно
+        ASSERT_HINT(res.at(0).id == 1 && words == words_res && res.size() == 1,
+            "Not removed document with one minus-word"s);
 }
 
 // Проверка матчинга документов
@@ -375,21 +378,26 @@ void TestMatchDocument() {
 
     SearchServer server;
     server.AddDocument(doc_id, content, DocumentStatus::BANNED, ratings);
-    auto [words_res, status] = server.MatchDocument("class find document -this"s, doc_id);
-    ASSERT_HINT(words_res.empty(), "Document should be deleted when minus-words found");  // Ожидаем пустой вектор из-за наличия минус-слова
-    tie(words_res, status) = server.MatchDocument("class find document"s, doc_id);
-    vector<string> res = { "class"s, "document"s, "find"s };    // алфавитный порядок
-    ASSERT_HINT(words_res == res, "Match document error"s);
+    {
+        auto [words_res, status] = server.MatchDocument("class find document -this"s, doc_id);
+        ASSERT_HINT(words_res.empty(), "Document should be deleted when minus-words found");  // Ожидаем пустой вектор из-за наличия минус-слова
 
-    doc_id = 2;
-    content = "Hey class lets pass the test with minus words"s;
-    ratings = { 1, 2, -4 };
-    server.AddDocument(doc_id, content, DocumentStatus::BANNED, ratings);
-    tie(words_res, status) = server.MatchDocument("pass test -this"s, doc_id);
-    //ASSERT( (status == DocumentStatus::BANNED && words_res == {"pass", "test"} ));
-    res = { "pass", "test" };
-    ASSERT(status == DocumentStatus::BANNED && words_res == res);   // Находим документ по проверке с минус-словом
-
+    }
+    {
+        auto [words_res, status] = server.MatchDocument("class find document"s, doc_id);
+        vector<string> res = { "class"s, "document"s, "find"s };    // алфавитный порядок
+        ASSERT_HINT(words_res == res, "Match document error"s);
+    }
+    {
+        doc_id = 2;
+        content = "Hey class lets pass the test with minus words"s;
+        ratings = { 1, 2, -4 };
+        server.AddDocument(doc_id, content, DocumentStatus::BANNED, ratings);
+        auto [words_res, status] = server.MatchDocument("pass test -this"s, doc_id);
+        //ASSERT( (status == DocumentStatus::BANNED && words_res == {"pass", "test"} ));
+        vector<string> res = { "pass", "test" };
+        ASSERT(status == DocumentStatus::BANNED && words_res == res);   // Находим документ по проверке с минус-словом
+    }
 }
 
 // Проверка правильности сортировки (по убыванию релевантности)
@@ -404,10 +412,9 @@ void TestCorrectSort() {
 
     const string query = "белый пушистый пёс"s;
     double min = 99.0;
-    for (auto& doc : search_server.FindTopDocuments(query)) {
-        if (doc.relevance < min)
-            min = doc.relevance;
-        ASSERT_HINT(min <= doc.relevance, "The sorting should be in descending order"s);
+    auto documents = search_server.FindTopDocuments(query);
+    for (size_t i = 0; i + 1 < documents.size(); i++) {
+        ASSERT(documents[i + 1].relevance - documents[i].relevance < EPSILON);
     }
 }
 
@@ -424,12 +431,14 @@ void TestCalculateAverage() {
         return sum / static_cast<int>(nums.size());
     };
 
-    vector<Document> out = search_server.FindTopDocuments("белый кот"s);
+    vector<Document> documents = search_server.FindTopDocuments("белый кот"s);
     vector<int> res = { average({ 8, -3 }), average({ 7, 2, 7 }) }; // рейтинги из условия
     int i = 0;
-    for (auto& it : out) {
-        ASSERT_HINT(it.rating == res[i], "The average rating is calculated incorrectly"s);
-        i++;
+    for (auto& doc : documents) {
+        if (i <= res.size()) {
+            ASSERT_HINT(doc.rating == res[i], "The average rating is calculated incorrectly"s);
+            i++;
+        }
     }
 }
 
@@ -462,22 +471,16 @@ void TestFindDocumentWithNonDefaultStatus() {
     const string query = "скворец"s;
     auto res = search_server.FindTopDocuments(query, DocumentStatus::BANNED);
     auto [words, status] = search_server.MatchDocument(query, 3);
-    for (auto& doc : res)
-        ASSERT_HINT(doc.id == docBanned_id && status == DocumentStatus::BANNED, "Document with status BANNED found incorrently"s);
+    if (!res.empty()) {
+        // Если нашли неправильно
+        ASSERT_HINT(res.at(0).id == docBanned_id && status == DocumentStatus::BANNED, "Document with status BANNED found incorrently"s);
+    }
+    // Если не нашли вовсе
+    ASSERT_HINT(!res.empty(), "Document with status BANNED was not found"s);
 }
 
 // Проверка правильности вычисления релевантности
 void TestRelevanceComputing() {
-    SearchServer search_server;
-    search_server.SetStopWords("и в на"s);
-    search_server.AddDocument(0, "белый и модный ошейник"s, DocumentStatus::ACTUAL, { 8, -3 });
-    search_server.AddDocument(1, "ухоженный скворец евгений"s, DocumentStatus::ACTUAL, { 9 });
-
-    double rel = 0.0;
-    for (const Document& document : search_server.FindTopDocuments("пушистый ухоженный кот"s, DocumentStatus::ACTUAL)) {
-        rel = document.relevance;
-    }
-
     vector<string> query = SplitIntoWords("пушистый ухоженный кот"s);
     map <string, map<int, double>> wordsToFreq;
     map <int, double> docToRelevance;
@@ -491,13 +494,21 @@ void TestRelevanceComputing() {
     for (auto& i : v_doc1)
         wordsToFreq[i].insert({ 3, 1.0 / v_doc1.size() });
 
-    for (auto& word : query) {
-        if (wordsToFreq.count(word) == 0)
-            continue;
-        double IDF = log(document_count / wordsToFreq.at(word).size());
-        for (auto& [id, relevance] : wordsToFreq.at(word)) {
-            docToRelevance[id] += relevance * IDF;
-            ASSERT(docToRelevance[id] == rel);
+    SearchServer search_server;
+    search_server.SetStopWords("и в на"s);
+    search_server.AddDocument(0, "белый и модный ошейник"s, DocumentStatus::ACTUAL, { 8, -3 });
+    search_server.AddDocument(1, "ухоженный скворец евгений"s, DocumentStatus::ACTUAL, { 9 });
+
+    for (const Document& document : search_server.FindTopDocuments("пушистый ухоженный кот"s, DocumentStatus::ACTUAL)) {
+        const double rel = document.relevance;
+        for (auto& word : query) {
+            if (wordsToFreq.count(word) == 0)
+                continue;
+            const double idf = log(document_count / wordsToFreq.at(word).size());
+            for (auto& [id, relevance] : wordsToFreq.at(word)) {
+                docToRelevance[id] += relevance * idf;
+                ASSERT(docToRelevance[id] - rel < EPSILON);
+            }
         }
     }
 }
