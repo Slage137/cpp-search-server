@@ -403,6 +403,7 @@ void TestMatchDocument() {
 // Проверка правильности сортировки (по убыванию релевантности)
 void TestCorrectSort() {
     SearchServer search_server;
+
     search_server.SetStopWords("и в на"s);
 
     search_server.AddDocument(0, "белый кот и модный ошейник"s, DocumentStatus::ACTUAL, { 8, -3 });
@@ -410,11 +411,10 @@ void TestCorrectSort() {
     search_server.AddDocument(2, "ухоженный пёс выразительные глаза"s, DocumentStatus::ACTUAL, { 5, -12, 2, 1 });
     search_server.AddDocument(3, "ухоженный скворец евгений"s, DocumentStatus::BANNED, { 9 });
 
-    const string query = "белый пушистый пёс"s;
-    double min = 99.0;
+    const string query = "белый пушистый"s;
     auto documents = search_server.FindTopDocuments(query);
     for (size_t i = 0; i + 1 < documents.size(); i++) {
-        ASSERT(documents[i + 1].relevance - documents[i].relevance < EPSILON);
+        ASSERT(documents[i + 1].relevance < documents[i].relevance);
     }
 }
 
@@ -433,9 +433,12 @@ void TestCalculateAverage() {
 
     vector<Document> documents = search_server.FindTopDocuments("белый кот"s);
     vector<int> res = { average({ 8, -3 }), average({ 7, 2, 7 }) }; // рейтинги из условия
-    int i = 0;
-    for (auto& doc : documents) {
-        if (i <= res.size()) {
+    if (documents.size() != res.size()) {
+        ASSERT_HINT(documents.size() == res.size(), "FindTopDocuments(query) returned a vector of the wrong size");
+    }
+    else {
+        int i = 0;
+        for (auto& doc : documents) {
             ASSERT_HINT(doc.rating == res[i], "The average rating is calculated incorrectly"s);
             i++;
         }
@@ -507,7 +510,7 @@ void TestRelevanceComputing() {
             const double idf = log(document_count / wordsToFreq.at(word).size());
             for (auto& [id, relevance] : wordsToFreq.at(word)) {
                 docToRelevance[id] += relevance * idf;
-                ASSERT(docToRelevance[id] - rel < EPSILON);
+                ASSERT(abs(docToRelevance[id] - rel) < EPSILON);
             }
         }
     }
