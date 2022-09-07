@@ -101,9 +101,12 @@ public:
 
     void AddDocument(int document_id, const string& document, DocumentStatus status,
         const vector<int>& ratings) {
-        if ((document_id < 0) || (documents_.count(document_id) > 0)) {
-            throw invalid_argument("Incorrect document id");
+        if (document_id < 0) {
+            throw invalid_argument("Incorrect document id. Id < 0");
         }
+        if (documents_.count(document_id) > 0)
+            throw invalid_argument("Document with this id already exists");
+
         const auto words = SplitIntoWordsNoStop(document);
 
         const double inv_word_count = 1.0 / words.size();
@@ -121,7 +124,7 @@ public:
         auto matched_documents = FindAllDocuments(query, document_predicate);
 
         sort(matched_documents.begin(), matched_documents.end(), [](const Document& lhs, const Document& rhs) {
-            if (abs(lhs.relevance - rhs.relevance) < 1e-6) {
+            if (abs(lhs.relevance - rhs.relevance) < EPSILON) {
                 return lhs.rating > rhs.rating;
             }
             else {
