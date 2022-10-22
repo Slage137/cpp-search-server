@@ -43,7 +43,6 @@ class Paginator {
 public:
     Paginator(Iterator begin, Iterator end, size_t page_size)
     {
-        assert(end >= begin && page_size != 0);
         auto size_container = distance(begin, end);
         auto page_number = size_container / page_size; // Количество целых страниц
         // итератор, по которому будем делить страницы.

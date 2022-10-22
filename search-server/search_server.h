@@ -4,12 +4,13 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
-
 #include "string_processing.h"
 #include "document.h"
+//#include "log_duration.h"
 
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
 const double EPSILON = 1e-6;
+//using namespace std::string_literals; // enables s-suffix for std::string literals
 
 class SearchServer {
 public:
@@ -64,16 +65,15 @@ public:
         return static_cast<int>(documents_.size());
     }
 
-    int GetDocumentId(int index) const {
-        if (index >= 0 && index < GetDocumentCount()) {
-            return document_ids_[index];
-        }
-        else
-            throw std::out_of_range("Incorrect document index in GetDocumentId");
-        return INVALID_DOCUMENT_ID;
-    }
+    std::vector<int>::const_iterator begin() const { return document_ids_.begin(); }
+
+    std::vector<int>::const_iterator end() const { return document_ids_.end(); }
 
     std::tuple<std::vector<std::string>, DocumentStatus> MatchDocument(const std::string& raw_query, int document_id) const;
+
+    const std::map<std::string, double>& GetWordFrequencies(int document_id) const;
+
+    void RemoveDocument(int document_id);
 
 private:
     struct DocumentData {
@@ -82,6 +82,7 @@ private:
     };
     const std::set<std::string> stop_words_;
     std::map<std::string, std::map<int, double>> word_to_document_freqs_;
+    std::map<int, std::map<std::string, double>> document_to_word_freqs_;
     std::map<int, DocumentData> documents_;
     std::vector<int> document_ids_;
 
@@ -117,7 +118,7 @@ private:
 
     // Existence required
     double ComputeWordInverseDocumentFreq(const std::string& word) const {
-        return log(GetDocumentCount() * 1.0 / word_to_document_freqs_.at(word).size());
+        return log(GetDocumentCount() * 1.0 / static_cast<int>(word_to_document_freqs_.at(word).size()));
     }
 
     template <typename DocumentPredicate>
@@ -152,3 +153,8 @@ private:
         return matched_documents;
     }
 };
+
+void RemoveDuplicates(SearchServer& search_server);
+
+// Дополнительная функция для простоты использования main из заданий
+void AddDocument(SearchServer& search_server, int document_id, const std::string& document, DocumentStatus status, const std::vector<int>& ratings);
